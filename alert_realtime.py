@@ -1,4 +1,4 @@
-"""
+
 India Non-Fossil Power Alert — Real-Time
 -----------------------------------------
 Data: npp.gov.in/dashBoard/demandmet2chartdata (live, ~4-min updates)
@@ -28,7 +28,7 @@ EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
 SMTP_SERVER    = "smtp.gmail.com"
 SMTP_PORT      = 587
 
-ALERT_COOLDOWN_HOURS = 6
+ALERT_COOLDOWN_HOURS = 0
 AVERAGE_DAYS         = 30
 
 NON_FOSSIL = ["HYDRO", "NUCLEAR", "SOLAR", "WIND", "RENEWABLE", "RES",
