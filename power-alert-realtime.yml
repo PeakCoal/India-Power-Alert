@@ -1,15 +1,13 @@
-name: India Non-Fossil Power Alert (Real-Time)
+name: India Non-Fossil Power Alert
 
 on:
   schedule:
-    - cron: '*/30 * * * *'   # Every 30 minutes — matches MERIT India's update cadence
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 jobs:
   alert:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -19,22 +17,11 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          pip install playwright requests pandas twilio
-          playwright install chromium
-          playwright install-deps chromium
+        run: pip install requests pandas
 
-      - name: Run real-time alert
+      - name: Run alert
         env:
-          SLACK_WEBHOOK_URL:   ${{ secrets.SLACK_WEBHOOK_URL }}
-          TWILIO_ACCOUNT_SID:  ${{ secrets.TWILIO_ACCOUNT_SID }}
-          TWILIO_AUTH_TOKEN:   ${{ secrets.TWILIO_AUTH_TOKEN }}
-          WHATSAPP_FROM:       ${{ secrets.WHATSAPP_FROM }}
-          WHATSAPP_TO:         ${{ secrets.WHATSAPP_TO }}
+          EMAIL_FROM:     ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO:       ${{ secrets.EMAIL_TO }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         run: python alert_realtime.py
-
-      - name: Commit state
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "chore: update last_alert.json [skip ci]"
-          file_pattern: last_alert.json
