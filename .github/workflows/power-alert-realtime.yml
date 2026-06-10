@@ -2,7 +2,8 @@ name: India Non-Fossil Power Alert
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '0 * * * *'    # Top of every hour
+    - cron: '30 * * * *'   # Half past every hour
   workflow_dispatch:
 
 jobs:
