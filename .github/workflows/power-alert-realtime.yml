@@ -13,6 +13,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - uses: actions/setup-python@v5
         with:
@@ -33,3 +35,4 @@ jobs:
         with:
           commit_message: "chore: update last_alert.json [skip ci]"
           file_pattern: last_alert.json
+          push_options: '--force'
