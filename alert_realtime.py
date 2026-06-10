@@ -2,7 +2,7 @@
 India Non-Fossil Power Alert — Real-Time
 -----------------------------------------
 Data: npp.gov.in/dashBoard/demandmet2chartdata (live, ~4-min updates)
-Average: time-matched — compares current hour against same hour over past 30 days
+Average: time-matched — compares current hour against same hour over past 365 days
 Alerts: Email via Gmail SMTP
 Run: every 30 min via GitHub Actions
 """
@@ -11,6 +11,7 @@ import os
 import json
 import smtplib
 import requests
+import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
@@ -30,78 +31,78 @@ SMTP_SERVER    = "smtp.gmail.com"
 SMTP_PORT      = 587
 
 AVERAGE_DAYS   = 365
-HOUR_WINDOW    = 1  # match readings within +/- 1 hour of current time
+HOUR_WINDOW    = 1
 
 NON_FOSSIL = ["HYDRO", "NUCLEAR", "SOLAR", "WIND", "RENEWABLE", "RES",
               "SMALL HYDRO", "BIOMASS", "BAGASSE"]
 
 HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://npp.gov.in"}
 
-# ── Fetch generation for a given date, optionally filtered by hour ────────────
+# ── Fetch with retry ──────────────────────────────────────────────────────────
+
+def get_with_retry(url, params, retries=3, timeout=30):
+    for attempt in range(retries):
+        try:
+            resp = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
+            resp.raise_for_status()
+            return resp
+        except Exception as e:
+            print(f"  Attempt {attempt + 1}/{retries} failed: {e}")
+            if attempt < retries - 1:
+                time.sleep(5)
+    return None
+
+# ── Fetch generation for a given date ────────────────────────────────────────
 
 def fetch_generation(target_date: str, target_hour: int = None) -> dict | None:
-    """
-    Fetch generation data for a date.
-    If target_hour is set, returns the reading closest to that hour.
-    Otherwise returns the latest reading of the day.
-    """
-    try:
-        resp = requests.get(GENERATION_URL, params={"date": target_date},
-                            headers=HEADERS, timeout=15)
-        resp.raise_for_status()
-        rows = resp.json()
-        if not rows:
-            return None
-
-        # Group all readings by timestamp
-        by_ts = {}
-        for row in rows:
-            src = row["name_of_data"].replace(" GENERATION", "").strip().upper()
-            ts  = row["updated_on"]
-            if ts not in by_ts:
-                by_ts[ts] = {}
-            by_ts[ts][src] = float(row["value_of_data"])
-
-        if not by_ts:
-            return None
-
-        # Pick the timestamp closest to target_hour, or latest if no hour given
-        if target_hour is not None:
-            def hour_diff(ts):
-                dt = datetime.fromtimestamp(ts / 1000, tz=IST)
-                return abs(dt.hour - target_hour)
-            best_ts = min(by_ts.keys(), key=hour_diff)
-        else:
-            best_ts = max(by_ts.keys())
-
-        sources       = by_ts[best_ts]
-        timestamp     = datetime.fromtimestamp(best_ts / 1000, tz=IST).strftime("%Y-%m-%d %H:%M IST")
-        non_fossil_mw = sum(mw for src, mw in sources.items()
-                            if any(nf in src for nf in NON_FOSSIL))
-        fossil_mw     = sum(mw for src, mw in sources.items()
-                            if not any(nf in src for nf in NON_FOSSIL))
-        total_mw      = sum(sources.values())
-        non_fossil_pct = (non_fossil_mw / total_mw * 100) if total_mw else 0
-
-        return {
-            "sources":        sources,
-            "non_fossil_mw":  round(non_fossil_mw, 1),
-            "fossil_mw":      round(fossil_mw, 1),
-            "total_mw":       round(total_mw, 1),
-            "non_fossil_pct": round(non_fossil_pct, 1),
-            "timestamp":      timestamp,
-        }
-    except Exception as e:
-        print(f"  Error fetching {target_date}: {e}")
+    resp = get_with_retry(GENERATION_URL, {"date": target_date})
+    if not resp:
         return None
+
+    rows = resp.json()
+    if not rows:
+        return None
+
+    by_ts = {}
+    for row in rows:
+        src = row["name_of_data"].replace(" GENERATION", "").strip().upper()
+        ts  = row["updated_on"]
+        if ts not in by_ts:
+            by_ts[ts] = {}
+        by_ts[ts][src] = float(row["value_of_data"])
+
+    if not by_ts:
+        return None
+
+    if target_hour is not None:
+        def hour_diff(ts):
+            dt = datetime.fromtimestamp(ts / 1000, tz=IST)
+            return abs(dt.hour - target_hour)
+        best_ts = min(by_ts.keys(), key=hour_diff)
+    else:
+        best_ts = max(by_ts.keys())
+
+    sources        = by_ts[best_ts]
+    timestamp      = datetime.fromtimestamp(best_ts / 1000, tz=IST).strftime("%Y-%m-%d %H:%M IST")
+    non_fossil_mw  = sum(mw for src, mw in sources.items()
+                         if any(nf in src for nf in NON_FOSSIL))
+    fossil_mw      = sum(mw for src, mw in sources.items()
+                         if not any(nf in src for nf in NON_FOSSIL))
+    total_mw       = sum(sources.values())
+    non_fossil_pct = (non_fossil_mw / total_mw * 100) if total_mw else 0
+
+    return {
+        "sources":        sources,
+        "non_fossil_mw":  round(non_fossil_mw, 1),
+        "fossil_mw":      round(fossil_mw, 1),
+        "total_mw":       round(total_mw, 1),
+        "non_fossil_pct": round(non_fossil_pct, 1),
+        "timestamp":      timestamp,
+    }
 
 # ── Time-matched historical average ──────────────────────────────────────────
 
 def fetch_average_mw(current_hour: int, days: int = AVERAGE_DAYS) -> dict:
-    """
-    For each of the past N days, fetch the reading closest to current_hour.
-    This gives a like-for-like comparison (e.g. 2pm today vs 2pm average).
-    """
     print(f"Computing {days}-day time-matched average for hour {current_hour:02d}:xx IST...")
     readings_mw  = []
     readings_pct = []
@@ -178,10 +179,10 @@ def run():
     current_hour = now.hour
     today        = now.strftime("%Y-%m-%d")
 
-    print(f"Fetching live data for {today} (current hour: {current_hour:02d}:xx IST)...")
+    print(f"Fetching live data for {today} (hour: {current_hour:02d}:xx IST)...")
     data = fetch_generation(today)
     if not data:
-        print("Failed to fetch live data.")
+        print("Failed to fetch live data after retries — exiting.")
         return
 
     avg = fetch_average_mw(current_hour)
