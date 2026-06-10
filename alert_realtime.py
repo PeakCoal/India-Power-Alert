@@ -29,7 +29,7 @@ EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
 SMTP_SERVER    = "smtp.gmail.com"
 SMTP_PORT      = 587
 
-AVERAGE_DAYS   = 30
+AVERAGE_DAYS   = 365
 HOUR_WINDOW    = 1  # match readings within +/- 1 hour of current time
 
 NON_FOSSIL = ["HYDRO", "NUCLEAR", "SOLAR", "WIND", "RENEWABLE", "RES",
