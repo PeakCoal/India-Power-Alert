@@ -13,9 +13,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -31,12 +28,10 @@ jobs:
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         run: python alert_realtime.py
 
-      - name: Commit state
+      - name: Save state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git reset --soft origin/main
           git add last_alert.json
-          git diff --cached --quiet || git commit -m "chore: update last_alert.json [skip ci]"
-          git push origin main
+          git diff --cached --quiet || git commit -m "chore: update state [skip ci]"
+          git push origin HEAD:main --force
