@@ -31,14 +31,10 @@ SMTP_SERVER    = "smtp.gmail.com"
 SMTP_PORT      = 587
 
 AVERAGE_DAYS   = 365
-HOUR_WINDOW    = 1
-
 NON_FOSSIL = ["HYDRO", "NUCLEAR", "SOLAR", "WIND", "RENEWABLE", "RES",
               "SMALL HYDRO", "BIOMASS", "BAGASSE"]
 
 HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://npp.gov.in"}
-
-# ── Fetch with retry ──────────────────────────────────────────────────────────
 
 def get_with_retry(url, params, retries=3, timeout=30):
     for attempt in range(retries):
@@ -52,17 +48,13 @@ def get_with_retry(url, params, retries=3, timeout=30):
                 time.sleep(5)
     return None
 
-# ── Fetch generation for a given date ────────────────────────────────────────
-
 def fetch_generation(target_date: str, target_hour: int = None) -> dict | None:
     resp = get_with_retry(GENERATION_URL, {"date": target_date})
     if not resp:
         return None
-
     rows = resp.json()
     if not rows:
         return None
-
     by_ts = {}
     for row in rows:
         src = row["name_of_data"].replace(" GENERATION", "").strip().upper()
@@ -70,10 +62,8 @@ def fetch_generation(target_date: str, target_hour: int = None) -> dict | None:
         if ts not in by_ts:
             by_ts[ts] = {}
         by_ts[ts][src] = float(row["value_of_data"])
-
     if not by_ts:
         return None
-
     if target_hour is not None:
         def hour_diff(ts):
             dt = datetime.fromtimestamp(ts / 1000, tz=IST)
@@ -81,7 +71,6 @@ def fetch_generation(target_date: str, target_hour: int = None) -> dict | None:
         best_ts = min(by_ts.keys(), key=hour_diff)
     else:
         best_ts = max(by_ts.keys())
-
     sources        = by_ts[best_ts]
     timestamp      = datetime.fromtimestamp(best_ts / 1000, tz=IST).strftime("%Y-%m-%d %H:%M IST")
     non_fossil_mw  = sum(mw for src, mw in sources.items()
@@ -90,7 +79,6 @@ def fetch_generation(target_date: str, target_hour: int = None) -> dict | None:
                          if not any(nf in src for nf in NON_FOSSIL))
     total_mw       = sum(sources.values())
     non_fossil_pct = (non_fossil_mw / total_mw * 100) if total_mw else 0
-
     return {
         "sources":        sources,
         "non_fossil_mw":  round(non_fossil_mw, 1),
@@ -100,29 +88,22 @@ def fetch_generation(target_date: str, target_hour: int = None) -> dict | None:
         "timestamp":      timestamp,
     }
 
-# ── Time-matched historical average ──────────────────────────────────────────
-
 def fetch_average_mw(current_hour: int, days: int = AVERAGE_DAYS) -> dict:
     print(f"Computing {days}-day time-matched average for hour {current_hour:02d}:xx IST...")
     readings_mw  = []
     readings_pct = []
-
     for i in range(1, days + 1):
         d    = (datetime.now(IST) - timedelta(days=i)).strftime("%Y-%m-%d")
         data = fetch_generation(d, target_hour=current_hour)
-        if data and data["non_fossil_mw"] > 0:
+        if data and data["non_fossil_mw"] > 0 and data["total_mw"] > 100000:
             readings_mw.append(data["non_fossil_mw"])
             readings_pct.append(data["non_fossil_pct"])
-
     if not readings_mw:
         return {"avg_mw": 0.0, "avg_pct": 0.0, "n_days": 0}
-
     avg_mw  = round(sum(readings_mw)  / len(readings_mw), 1)
     avg_pct = round(sum(readings_pct) / len(readings_pct), 1)
     print(f"Time-matched avg from {len(readings_mw)} days: {avg_mw:,.0f} MW / {avg_pct:.1f}%")
     return {"avg_mw": avg_mw, "avg_pct": avg_pct, "n_days": len(readings_mw)}
-
-# ── State ─────────────────────────────────────────────────────────────────────
 
 def load_state() -> dict:
     try:    return json.loads(STATE_FILE.read_text())
@@ -130,8 +111,6 @@ def load_state() -> dict:
 
 def save_state(state: dict):
     STATE_FILE.write_text(json.dumps(state))
-
-# ── Email ─────────────────────────────────────────────────────────────────────
 
 def send_email(data: dict, avg: dict, pct_vs_avg: float, current_hour: int):
     sign = "+" if pct_vs_avg > 0 else ""
@@ -163,16 +142,12 @@ Source: MERIT India / National Power Portal
     msg["From"]    = EMAIL_FROM
     msg["To"]      = EMAIL_TO
     msg.attach(MIMEText(body, "plain"))
-
     with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
         server.ehlo()
         server.starttls()
         server.login(EMAIL_FROM, EMAIL_PASSWORD)
         server.sendmail(EMAIL_FROM, EMAIL_TO, msg.as_string())
-
     print(f"✓ Email sent to {EMAIL_TO}")
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 
 def run():
     now          = datetime.now(IST)
@@ -183,6 +158,13 @@ def run():
     data = fetch_generation(today)
     if not data:
         print("Failed to fetch live data after retries — exiting.")
+        return
+
+    # Sanity check — skip if total looks incomplete
+    min_total = 120000 if (22 <= current_hour or current_hour <= 4) else 180000
+    if data["total_mw"] < min_total:
+        print(f"Sanity check failed: total {data['total_mw']:,.0f} MW below minimum "
+              f"{min_total:,.0f} MW — likely incomplete data, skipping.")
         return
 
     avg = fetch_average_mw(current_hour)
